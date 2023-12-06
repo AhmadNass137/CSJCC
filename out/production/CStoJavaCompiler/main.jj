@@ -1,0 +1,405 @@
+options {
+    LOOKAHEAD = 3;
+}
+// Define the parser class and import the necessary packages
+PARSER_BEGIN(main)
+import nodes.*;
+import java.util.Scanner;
+public class main {
+    public static void main(String[] args)  throws ParseException {
+        main parser = new main(System.in); // Create a parser object with standard input
+        treeNode n = parser.start(); // Parse the input and get the root node of the syntax tree
+        n.execute(); // Execute the syntax tree
+    }
+}
+
+PARSER_END(main)
+
+TOKEN : {
+    <#CHAR: ["a"-"z","A"-"Z"]> |
+    <#ZERO: "0"> |
+    <#DIGIT: ["1"-"9"]> |
+    <END_STMNT: ";"> |
+    <POS: "+"> |
+    <NEG: "-"> |
+    <INT: (<POS> | <NEG>)?<DIGIT>(["0"-"9"])* > |
+    <DOUBLE: (<POS> | <NEG>)?(["0"-"9"])+ ("." (["0"-"9"])+)? > |
+    <ASSIGN: "="> |
+    <NEW: "new"> |
+    <IF: "if"> |
+    <ELSE: "else"> |
+    <DATATYPE: "bool" | "int" | "double" | "char" | "string"> |
+    <COND_OPS: "&&" | "||" > |
+    <REL_OPS: ">" | "<" | "==" | "!=" | ">=" | "<="> |
+    <READ: "Console.ReadLine"> | // C# method for reading input
+    <WRITE: "Console.WriteLine"> | // C# method for writing output
+    <SWITCH: "switch" > |
+    <CASE: "case"> |
+    <DEF: "default" > |
+    <BREAK: "break"> |
+    <WHILE: "while"> |
+    <FOREACH: "foreach"> |
+    <IN: "in"> |
+    <VARNAME: ("_"|<CHAR>)(<CHAR> | <DIGIT> | "_")*> | // A variable name starts with a char or _ exclusively
+    <STRING: "\"" (~["\""])* "\""> // A string literal is always written between two double quotations
+}
+
+// Characters to skip
+SKIP : { " " | "\t" | "\n" | "\r" | <COMMENT: "/*"(<CHAR> | " " | <DIGIT> | <ZERO>)*"*/"> }
+
+// Define the start production
+treeNode start(): {treeNode n; blockNode b = new blockNode();}{
+      n = blockSt() // Parse a block statement
+      { return n; } // Return the root node
+ }
+/* Define the block statement production
+    a block is always written between { }
+    inside a block, you can write any of these statements:
+    - Declare statement
+    - Assign statement
+    - Input statement
+    - Output statement
+    - Modification (increment/decrement) statement
+    - if statement
+    - while loop statement
+    - switch statement
+    - foreach statement
+ */
+blockNode blockSt(): { treeNode n; blockNode b = new blockNode(); } {
+     "{"
+     (
+        (
+        n = declareSt() |
+        n = assignSt() |
+        n = inputSt() |
+        n = outputSt() |
+        n = modificationSt() |
+        n = declareArray() |
+        n = ifSt() |
+        n = whileSt() |
+        n = switchSt() |
+        n = foreachSt()
+        )
+        { b.addChild(n); } // Add the parsed statement as a child of the block node
+    )+ // You can write as many statments as you want
+        "}"
+      {return b;}
+
+}
+
+// Declaration statement is used to declare a new variable
+// Also includes delcare-and-assign
+// Syntax: <DATATYPE> <VARNAME>; or <DATATYPE> <VARNAME> = value();
+declareNode declareSt() : {
+    declareNode d = new declareNode(); // Create a declaration node
+    stringNode dt = new stringNode(); // Create a string node for data type
+    stringNode varname = new stringNode(); // Create a string node for variable name
+    valueNode val = new valueNode(); // Create a value node for initial value
+    Token t1, t2, t3; // Create tokens for data type, variable name, and initial value
+    t3 = null; // Initialize the initial value token to null
+} {
+    t1 = <DATATYPE> // Expect a data type token
+    t2 = <VARNAME> // Expect a variable name token
+    (<ASSIGN> (t3 = value()))? // Optionally expect an assignment operator and a value token
+    <END_STMNT> // Expect an end of statement token
+    {
+    dt.setValue(t1.image); // Set the data type node value to the data type token image
+    varname.setValue(t2.image); // Set the variable name node value to the variable name token image
+    d.addChild(varname); // Add the variable name node as a child of the declaration node
+    d.addChild(dt); // Add the data type node as a child of the declaration node
+    if (t3 != null) { // If the initial value token is not null
+        val.setValue(t3.image); // Set the value node value to the initial value token image
+        d.addChild(val); // Add the value node as a child of the declaration node
+    }
+    return d; // Return the declaration node
+    }
+}
+
+/*
+    An array declaration is a special type of declaration
+    The syntax of declaring an is: <DATAYPE> [] <VARNAME> = { value(), value(), ..., value(), };
+    At least one value must be given
+ */
+arrayNode declareArray(): {
+    stringNode type = new stringNode(); // Create a string node for array type
+    stringNode name = new stringNode(); // Create a string node for array name
+    valueNode value; // Create a value node for array element
+    arrayNode array = new arrayNode(); // Create an array node
+    Token t1,t2, t3, t4; // Create tokens for array type, array name, array element, and end of statement
+    } {
+    (t1 = <DATATYPE> )"[]" (t2 = <VARNAME> ) <ASSIGN> "{" // Expect a data type token, followed by "[]", followed by a variable name token, followed by an assignment operator, followed by an opening brace
+    t3 = value() { value = new valueNode(t3.image); array.addChild(value);} // Expect a value token and add it as a child of the array node
+     ("," t3 = value() { value = new valueNode(t3.image); array.addChild(value);})* "}" <END_STMNT> // Optionally expect more value tokens separated by commas, followed by a closing brace, followed by an end of statement token
+    {
+        type.setValue(t1.image); // Set the array type node value to the data type token image
+        name.setValue(t2.image); // Set the array name node value to the variable name token image
+        array.addChild(type); // Add the array type node as a child of the array node
+        array.addChild(name); // Add the array name node as a child of the array node
+        return array; // Return the array node
+        }
+    }
+
+// Assignment statements assign a value to a variable
+// Syntax: <VARNAME> = value();
+assignNode assignSt(): {
+    assignNode z = new assignNode(); // Create an assignment node
+    stringNode name = new stringNode(); // Create a string node for variable name
+    valueNode val = new valueNode(); // Create a value node for assigned value
+    Token t1, t2, t3; // Create tokens for variable name, assignment operator, and assigned value
+    } {
+    t1 = <VARNAME> // Expect a variable name token
+    <ASSIGN> // Expect an assignment operator token
+    t2 = value() // Expect a value token
+    <END_STMNT> // Expect an end of statement token
+    {
+        name.setValue(t1.image); // Set the variable name node value to the variable name token image
+        val.setValue(t2.image); // Set the value node value to the value token image
+        z.addChild(name); // Add the variable name node as a child of the assignment node
+        z.addChild(val); // Add the value node as a child of the assignment node
+        return z; // Return the assignment node
+    }
+}
+
+// A modification is essentially either a decrement statement or an increment statement
+// Syntax: <VARNAME>++; or <VARNAME>--;
+modificationNode modificationSt():
+{
+    modificationNode  m = new modificationNode (); // Create a modification node
+    stringNode s1,s2; // Create string nodes for variable name and modification operator
+    Token t1,t2; // Create tokens for variable name and modification operator
+}
+{
+
+t1 = <VARNAME>(t2 = "++" | t2 = "--") <END_STMNT>
+    {
+       // Create a string node for the variable name and the operator
+       s1 = new stringNode(t1.image);
+       s2 = new stringNode(t2.image);
+       // Add them as children to the unary expression node
+       m.addChild(s1);
+       m.addChild(s2);
+       return m;
+    }
+}
+
+// Input statement reads a value from the user and assigns it to a variable
+// Syntax: <VARNAME> = Console.ReadLine();
+inputNode inputSt(): {
+    // Create a scanner object to read from the standard input
+    Scanner scan = new Scanner(System.in);
+    // Create an input node to represent the input statement
+    inputNode in = new inputNode();
+    // Create a string node to store the variable name
+    stringNode varname = new stringNode();
+    // Create a string node to store the input value
+    stringNode input = new stringNode();
+    // Declare a string variable to store the input value
+    String read;
+    // Declare a token variable to store the variable name
+    Token t1;
+    } {
+    // Parse the variable name
+    t1 = <VARNAME>
+    // Parse the assignment operator, the read keyword, and the end statement symbol
+    <ASSIGN> <READ> "()" <END_STMNT>
+    {
+        // Set the value of the variable name node to the image of the token
+        varname.setValue(t1.image);
+        // Add the variable name node as a child to the input node
+        in.addChild(varname);
+        // Return the input node
+        return in;
+    }
+}
+
+// Output statements write one or more values to the standard output
+// Syntax: Console.WriteLine(<VARNAME> or value() (+ <VARNAME> or value())*);
+outputNode outputSt(): {
+    // Create an output node to represent the output statement
+    outputNode out = new outputNode();
+    // Create a tree node to store the value to be printed
+    treeNode print = new stringNode();
+    // Declare a token variable to store the value
+    Token t1;
+    } {
+    // Parse the write keyword and the opening parenthesis
+    <WRITE> "("
+    // Parse the first value to be printed, which can be a variable name, a string literal, an integer literal, or a double literal
+    (t1 = <VARNAME> {stringNode s = new stringNode(t1.image); out.addChild(s);} | t1 = <STRING> {stringNode s = new stringNode(t1.image); out.addChild(s);} | t1 = <INT> {constNode c = new constNode(t1.image); out.addChild(c);} | t1 = <DOUBLE> {constNode c = new constNode(t1.image); out.addChild(c);})?
+    // Parse zero or more additional values to be printed, separated by the + operator
+    (<POS> (t1 = <VARNAME> {stringNode s = new stringNode(t1.image); out.addChild(s);} | t1 = <STRING> {stringNode s = new stringNode(t1.image); out.addChild(s);} | t1 = <INT> {constNode c = new constNode(t1.image); out.addChild(c);} | t1 = <DOUBLE> {constNode c = new constNode(t1.image); out.addChild(c);}))*
+    // Parse the closing parenthesis and the end statement symbol
+    ")" <END_STMNT>
+    {
+        // Return the output node
+        return out;
+    }
+}
+
+/* if statement
+ Syntax:
+ if (conditionNode())
+  blockNode()
+ (else
+  blockNode()
+ )?
+ */
+ifNode ifSt(): {
+    // Create an if node to represent the if statement
+    ifNode i = new ifNode();
+    // Create a condition node to store the condition expression
+    conditionNode c;
+    // Create a block node to store the statements in the if branch
+    blockNode bif = new blockNode();
+    // Create a block node to store the statements in the else branch
+    blockNode belse = new blockNode();
+    } {
+    // Parse the if keyword and the condition expression
+    <IF> c = condition()
+    // Parse the statements in the if branch
+    bif = blockSt()
+    {
+        // Add the condition node and the if branch node as children to the if node
+        i.addChild(c);
+        i.addChild(bif);
+    }
+    // Parse the optional else clause
+    (<ELSE> belse = blockSt()
+    {
+        // Add the else branch node as a child to the if node
+        i.addChild(belse);
+    })?
+    {
+        // Return the if node
+        return i;
+    }
+}
+
+/* while statement
+ Syntax:
+ while (conditionNode())
+  blockNode()
+ */
+whileNode whileSt(): {
+    // Create a while node to represent the while statement
+    whileNode wile = new whileNode();
+    // Create a condition node to store the condition expression
+    conditionNode cond = new conditionNode();
+    // Create a block node to store the block of statements
+    blockNode block = new blockNode();
+    } {
+        // Parse the while keyword and the condition expression
+        <WHILE> cond = condition()
+        // Parse the block of statements
+        block = blockSt()
+        {
+            // Add the condition node and the block node as children to the while node
+            wile.addChild(cond);
+            wile.addChild(block);
+            // Return the while node
+            return wile;
+        }
+}
+
+// This method parses a condition expression that consists of one or more relational expressions connected by logical operators
+conditionNode condition(): {
+    // Declare a condition node variable to store the condition expression
+    conditionNode c;
+    // Declare two value node variables to store the operands of a relational expression
+    valueNode v1, v2;
+    // Declare a string node variable to store the operator of a relational expression
+    stringNode s;
+    // Declare three token variables to store the tokens of a relational expression
+    Token t1, t2, t3;
+    // Declare a token variable to store the logical operator of a condition expression
+    Token cond;
+} {
+    // Parse the opening parenthesis of the condition expression
+    "("
+    // Parse the first relational expression, which consists of two values and a relational operator
+    t1 = value() (t3 = <REL_OPS>) t2 = value()
+    {
+        // Create a value node for each operand and a string node for the operator
+        v1 = new valueNode(t1.image);
+        v2 = new valueNode(t2.image);
+        s = new stringNode(t3.image);
+        // Create a condition node for the relational expression and add the nodes as children
+        c = new conditionNode();
+        c.addChild(v1);
+        c.addChild(v2);
+        c.addChild(s);
+    }
+    // Parse zero or more additional relational expressions, connected by logical operators
+    ((cond = <COND_OPS> | cond = <COND_OPS> ) t1 = value() (t3 = <REL_OPS>) t2 = value()
+    {
+        // Create a new condition node for the logical operator and add the previous condition node as a child
+        c = new conditionNode(cond.image);
+        System.out.println("new condition");
+        // Create a value node for each operand and a string node for the operator of the relational expression
+        v1 = new valueNode(t1.image);
+        v2 = new valueNode(t2.image);
+        s = new stringNode(t3.image);
+        // Add the nodes as children to the condition node
+        c.addChild(v1);
+        c.addChild(v2);
+        c.addChild(s);
+    } )*
+    // Parse the closing parenthesis of the condition expression
+    ")"
+    {
+        // Return the condition node
+        return c;
+    }
+}
+
+/*
+ switch statement:
+ Syntax:
+ switch (<VARNAME>):
+ (case (value()):
+ blockNode())+
+ */
+switchNode switchSt(): {
+    // Create a switch node to represent the switch statement
+    switchNode s = new switchNode();
+    // Create a block node to store the statements in each case
+    blockNode b;
+    // Create two string nodes to store the variable name and the case value
+    stringNode s1, s2;
+    // Create a const node to store the case value if it is a constant
+    constNode c;
+    // Declare two token variables to store the variable name and the case value
+    Token t1, t2;
+    } {
+    // Parse the switch keyword, the opening parenthesis, and the variable name
+    <SWITCH> "(" t1 = <VARNAME>
+    {
+        // Create a string node for the variable name and add it as a child to the switch node
+        s1 = new stringNode(t1.image);
+        s.addChild(s1);
+    }
+    // Parse the closing parenthesis and the opening brace
+    ")" "{"
+    // Parse one or more cases, each consisting of a case keyword, a value, a colon, a block of statements, a break keyword, and an end statement symbol
+    (<CASE> (t2 = <STRING> {s2 = new stringNode(t2.image); s.addChild(s2);} | t2 = <INT> {c = new constNode(t2.image); s.addChild(c);} | t2 =<DOUBLE> {c = new constNode(t2.image); s.addChild(c);})
+    ":" b = blockSt() {s.addChild(b);} <BREAK> <END_STMNT>)+
+    <DEF> ":" b = blockSt() {s.addChild(b);} <BREAK> <END_STMNT> "}"
+    { return s; }
+}
+
+/*
+ foreach statement
+
+ Syntax:
+ foreach (<DATATYPE> <VARNAME> in <VARNAME> (MUST BE A PREVIOUSLY DECLARED ARRAY))
+  blockNode()
+ */
+foreachNode foreachSt(): { foreachNode f; stringNode s1, s2, s3; blockNode b; Token t1, t2, t3; } {
+<FOREACH> "(" t3 = <DATATYPE> t1 = <VARNAME> <IN> t2 = <VARNAME> ")" b = blockSt() { s1 = new stringNode(t1.image); s2 = new stringNode(t2.image); s3 = new stringNode(t3.image); f = new foreachNode(s1, s2, s3, b); return f;} }
+
+Token value() : {Token t;} {
+    t = <VARNAME> {return t;} |
+	t = <STRING> {return t;} |
+	t = <INT> {return t;} |
+	t = <DOUBLE> {return t;}
+}
